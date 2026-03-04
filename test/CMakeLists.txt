@@ -17,16 +17,52 @@ add_executable(smoke_test_llvm_wasm smoke_test_llvm_wasm.cpp)
 target_include_directories(smoke_test_llvm_wasm PRIVATE ${LLVM_INCLUDE_DIRS})
 target_compile_definitions(smoke_test_llvm_wasm PRIVATE ${LLVM_DEFINITIONS})
 
-# Map LLVM components to libraries
+# Map LLVM components to libraries.
+# Each backend needs its CodeGen + AsmParser + Info components.
 llvm_map_components_to_libnames(llvm_libs
     Core
     IRReader
     BitWriter
     Support
+
+    # X86
     X86Info
     X86CodeGen
+    X86AsmParser
+
+    # ARM
+    ARMInfo
+    ARMCodeGen
+    ARMAsmParser
+
+    # AArch64
+    AArch64Info
+    AArch64CodeGen
+    AArch64AsmParser
+
+    # Hexagon
+    HexagonInfo
+    HexagonCodeGen
+    HexagonAsmParser
+
+    # NVPTX
+    NVPTXInfo
+    NVPTXCodeGen
+
+    # PowerPC
+    PowerPCInfo
+    PowerPCCodeGen
+    PowerPCAsmParser
+
+    # RISCV
+    RISCVInfo
+    RISCVCodeGen
+    RISCVAsmParser
+
+    # WebAssembly
     WebAssemblyInfo
     WebAssemblyCodeGen
+    WebAssemblyAsmParser
 )
 target_link_libraries(smoke_test_llvm_wasm PRIVATE ${llvm_libs})
 
