@@ -23,6 +23,7 @@ Platforms:
   x86-32-linux        manylinux_2_28_i686 (Docker)
   arm-64-linux        manylinux_2_28_aarch64 (Docker)
   arm-32-linux        manylinux_2_31_armv7l (Docker)
+  wasm32-emscripten   Cross-compile LLVM to wasm32 (requires emsdk + native LLVM)
 USAGE
 }
 
@@ -104,6 +105,48 @@ run_local_macos_build() {
   uv build --wheel -v --no-build-isolation --out-dir "$dist_dir" "${config_settings[@]}"
 }
 
+run_wasm_build() {
+  local dist_dir="dist/wasm32-emscripten"
+  mkdir -p "$dist_dir"
+
+  # Validate Emscripten
+  command -v emcc &>/dev/null || {
+    echo "error: emcc not found. Activate Emscripten SDK first: source emsdk_env.sh" >&2
+    exit 1
+  }
+
+  # Find native tablegen tools
+  local tblgen_llvm="" tblgen_clang=""
+  for suffix in -20 -21 ""; do
+    if command -v "llvm-tblgen${suffix}" &>/dev/null; then
+      tblgen_llvm="$(command -v "llvm-tblgen${suffix}")"
+      break
+    fi
+  done
+  for suffix in -20 -21 ""; do
+    if command -v "clang-tblgen${suffix}" &>/dev/null; then
+      tblgen_clang="$(command -v "clang-tblgen${suffix}")"
+      break
+    fi
+  done
+  [[ -n "$tblgen_llvm" ]] || { echo "error: llvm-tblgen not found. Install LLVM 20+." >&2; exit 1; }
+  [[ -n "$tblgen_clang" ]] || { echo "error: clang-tblgen not found. Install Clang 20+." >&2; exit 1; }
+
+  echo "Building halide-llvm (wasm32-emscripten)"
+  echo "  HALIDE_LLVM_REF: $HALIDE_LLVM_REF"
+  echo "  llvm-tblgen: $tblgen_llvm"
+  echo "  clang-tblgen: $tblgen_clang"
+  echo "  Output: $dist_dir/"
+
+  local config_settings=(
+    "--config-settings=cmake.define.CMAKE_TOOLCHAIN_FILE=toolchains/wasm32-emscripten.cmake"
+    "--config-settings=cmake.define.LLVM_TABLEGEN=$tblgen_llvm"
+    "--config-settings=cmake.define.CLANG_TABLEGEN=$tblgen_clang"
+  )
+
+  pip wheel . -w "$dist_dir/" -v "${config_settings[@]}"
+}
+
 run_linux_docker_build() {
   local platform="$1"
   local image dist_dir
@@ -179,6 +222,9 @@ x86-64-macos|arm-64-macos)
   ;;
 x86-64-linux|x86-32-linux|arm-64-linux|arm-32-linux)
   run_linux_docker_build "$PLATFORM"
+  ;;
+wasm32-emscripten)
+  run_wasm_build
   ;;
 *)
   echo "error: unknown platform: $PLATFORM" >&2

@@ -54,20 +54,25 @@ add_subdirectory("${LLVM_SOURCE_DIR}/llvm" llvm-build)
 # LLVM creates symlinks like clang++ -> clang, but wheels are ZIP files that
 # don't support symlinks. Each "symlink" becomes a full ~128MB copy.
 # We replace them with small bash wrappers to save space while keeping functionality.
-install(CODE "set(CONVERT_SYMLINK_SCRIPT \"${CMAKE_CURRENT_SOURCE_DIR}/convert-symlink.sh\")")
-install(CODE [[
-    file(GLOB binaries "${CMAKE_INSTALL_PREFIX}/bin/*")
-    foreach (binary IN LISTS binaries)
-        if (IS_SYMLINK "${binary}")
-            message(STATUS "Converting symlink: ${binary}")
-            execute_process(
-                COMMAND bash "${CONVERT_SYMLINK_SCRIPT}" "${binary}"
-                RESULT_VARIABLE res
-                ERROR_VARIABLE err
-            )
-            if (NOT res EQUAL 0)
-                message(FATAL_ERROR "Failed to convert symlink: ${err}")
+#
+# Skip when cross-compiling (e.g., wasm32 via Emscripten) since no executables
+# are built and no bin/ symlinks exist.
+if (NOT CMAKE_CROSSCOMPILING)
+    install(CODE "set(CONVERT_SYMLINK_SCRIPT \"${CMAKE_CURRENT_SOURCE_DIR}/convert-symlink.sh\")")
+    install(CODE [[
+        file(GLOB binaries "${CMAKE_INSTALL_PREFIX}/bin/*")
+        foreach (binary IN LISTS binaries)
+            if (IS_SYMLINK "${binary}")
+                message(STATUS "Converting symlink: ${binary}")
+                execute_process(
+                    COMMAND bash "${CONVERT_SYMLINK_SCRIPT}" "${binary}"
+                    RESULT_VARIABLE res
+                    ERROR_VARIABLE err
+                )
+                if (NOT res EQUAL 0)
+                    message(FATAL_ERROR "Failed to convert symlink: ${err}")
+                endif ()
             endif ()
-        endif ()
-    endforeach ()
-]])
+        endforeach ()
+    ]])
+endif ()

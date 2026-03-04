@@ -1,0 +1,148 @@
+name: Build wasm wheel
+
+on:
+  workflow_dispatch:
+    inputs:
+      llvm_ref:
+        description: "LLVM git ref (tag, branch, or SHA)"
+        required: true
+      emsdk_version:
+        description: "Emscripten SDK version"
+        required: false
+        default: "4.0.3"
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Job 1: Determine whether we need to build at all
+  # ---------------------------------------------------------------------------
+  check:
+    name: Check for existing wheels
+    runs-on: ubuntu-latest
+    outputs:
+      should_build: ${{ steps.check.outputs.should_build }}
+      llvm_ref: ${{ steps.check.outputs.llvm_ref }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve ref and check PyPI
+        id: check
+        shell: python
+        env:
+          HALIDE_LLVM_REF: ${{ inputs.llvm_ref }}
+          GITHUB_TOKEN: ${{ github.token }}
+          PYTHONPATH: .
+        run: |
+          import os, urllib.request
+          from _version_provider import version_from_tag, get_commit_info
+
+          ref = os.environ["HALIDE_LLVM_REF"]
+
+          # Build the search pattern for this ref
+          tag_version = version_from_tag(ref)
+          if tag_version:
+              pattern = f"halide_llvm-{tag_version}-"
+              resolved_ref = ref
+              print(f"Release tag detected, searching for: {pattern}")
+          else:
+              sha, _ = get_commit_info(ref)
+              pattern = f"g{sha[:8]}"
+              resolved_ref = sha
+              print(f"Dev ref detected, resolved to: {resolved_ref}")
+              print(f"Searching for: {pattern}")
+
+          # Check the simple index for existing wasm wheels
+          # Look for both the version pattern AND wasm/emscripten in the filename
+          try:
+              req = urllib.request.Request("https://pypi.halide-lang.org/simple/halide-llvm/")
+              index = urllib.request.urlopen(req, timeout=30).read().decode()
+          except Exception:
+              index = ""
+
+          # Check if a wasm wheel for this version already exists
+          has_version = pattern in index
+          has_wasm = f"{pattern}" in index and "emscripten" in index
+          should_build = "false" if has_wasm else "true"
+          print(f"should_build={should_build}")
+
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              f.write(f"should_build={should_build}\n")
+              f.write(f"llvm_ref={resolved_ref}\n")
+
+  # ---------------------------------------------------------------------------
+  # Job 2: Build wasm wheel
+  # ---------------------------------------------------------------------------
+  build:
+    name: Build / wasm32-emscripten
+    needs: check
+    if: needs.check.outputs.should_build == 'true'
+    runs-on: ubuntu-latest
+    env:
+      HALIDE_LLVM_REF: ${{ needs.check.outputs.llvm_ref }}
+      GITHUB_TOKEN: ${{ github.token }}
+      CMAKE_GENERATOR: Ninja
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # Install native LLVM tools for tablegen (required for cross-compilation)
+      - name: Install native LLVM 20
+        run: |
+          wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key | sudo apt-key add -
+          echo "deb http://apt.llvm.org/$(lsb_release -cs)/ llvm-toolchain-$(lsb_release -cs)-20 main" | \
+            sudo tee /etc/apt/sources.list.d/llvm-20.list
+          sudo apt-get update
+          sudo apt-get install -y llvm-20-tools clang-20
+
+      # Install Emscripten SDK
+      - name: Set up Emscripten
+        uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: ${{ inputs.emsdk_version || '4.0.3' }}
+
+      # Build wheel
+      - name: Build wheel
+        run: >
+          pip wheel . -w dist/ -v
+          --config-settings=cmake.define.CMAKE_TOOLCHAIN_FILE=toolchains/wasm32-emscripten.cmake
+          --config-settings=cmake.define.LLVM_TABLEGEN=/usr/lib/llvm-20/bin/llvm-tblgen
+          --config-settings=cmake.define.CLANG_TABLEGEN=/usr/lib/llvm-20/bin/clang-tblgen
+
+      # Retag wheel with the correct Emscripten platform tag
+      - name: Retag wheel
+        run: |
+          pip install wheel
+          EMSDK_VER="${{ inputs.emsdk_version || '4.0.3' }}"
+          EMSDK_TAG="emscripten_${EMSDK_VER//./_}_wasm32"
+          wheel tags --platform-tag "$EMSDK_TAG" --remove dist/*.whl
+
+      - name: Upload wheel
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheel-wasm32-emscripten
+          path: dist/*.whl
+
+  # ---------------------------------------------------------------------------
+  # Job 3: Upload to private PyPI
+  # ---------------------------------------------------------------------------
+  upload:
+    name: Upload to PyPI
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download wheel artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: wheel-wasm32-emscripten
+          path: dist/
+
+      - name: Upload to PyPI
+        env:
+          TWINE_USERNAME: upload
+          TWINE_PASSWORD: ${{ secrets.PYPI_UPLOAD_PASSWORD }}
+          TWINE_REPOSITORY_URL: https://pypi.halide-lang.org/
+        run: |
+          pip install "twine>=6" "packaging>=24.2"
+          twine upload dist/*.whl
