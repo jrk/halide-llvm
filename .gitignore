@@ -2,8 +2,9 @@
 /src_cache/
 
 # Build artifacts
-/build/
+/build*/
 /dist/
+/test/build*/
 *.whl
 *.egg-info/
 
