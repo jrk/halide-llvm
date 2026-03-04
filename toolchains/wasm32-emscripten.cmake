@@ -50,7 +50,4 @@ set(LLVM_ENABLE_LIBPFM OFF CACHE BOOL "")
 # Force static libs only
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "")
 
-# Use MinSizeRel for smaller wasm output
-set(CMAKE_BUILD_TYPE MinSizeRel CACHE STRING "")
-
 include("${CMAKE_CURRENT_LIST_DIR}/initial-cache.cmake")

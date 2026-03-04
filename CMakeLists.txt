@@ -49,6 +49,21 @@ endif ()
 add_subdirectory("${LLVM_SOURCE_DIR}/llvm" llvm-build)
 
 # =============================================================================
+# 4b. Cross-compilation fixups
+# =============================================================================
+# When cross-compiling (e.g., to wasm32 via Emscripten), some LLVM/Clang
+# executables slip past LLVM_BUILD_TOOLS=OFF / CLANG_BUILD_TOOLS=OFF because
+# they use add_clang_executable() directly. Exclude them from the default
+# build to avoid linker/optimizer crashes on very large wasm binaries.
+if (CMAKE_CROSSCOMPILING)
+    foreach (_target clang-ast-dump)
+        if (TARGET ${_target})
+            set_target_properties(${_target} PROPERTIES EXCLUDE_FROM_ALL TRUE)
+        endif ()
+    endforeach ()
+endif ()
+
+# =============================================================================
 # 5. Post-install cleanup: convert clang symlinks to wrappers
 # =============================================================================
 # LLVM creates symlinks like clang++ -> clang, but wheels are ZIP files that
